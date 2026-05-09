@@ -2,124 +2,125 @@
 session_start();
 include '../../config/database.php';
 
-// Cek apakah ada kiriman data dari form
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && !empty($_SESSION['keranjang'])) {
 
-    // 1. Ambil Data dari Form
+    $isAjax = isset($_POST['ajax']) && $_POST['ajax'] == '1';
+
     $kasirID = $_SESSION['user_id'] ?? 1; 
     $namaPel = $_POST['nama_pelanggan'];
     $hpPel   = $_POST['no_hp'];
     $emailPel= $_POST['email_pelanggan'];
     $alamat  = '-'; 
     
-    // PERBAIKAN ERROR MENGHITUNG KOSONG: Paksa inputan menjadi integer (angka asli). Jika dikosongkan, jadikan 0.
     $totalOngkos = isset($_POST['total_ongkos']) && $_POST['total_ongkos'] !== '' ? (int)$_POST['total_ongkos'] : 0;
     $diskon      = isset($_POST['diskon']) && $_POST['diskon'] !== '' ? (int)$_POST['diskon'] : 0;
-    
     $metodeBayar = $_POST['metode_bayar'];
     
-    // Hitung Total Transaksi
     $subtotalEmas = 0;
     foreach ($_SESSION['keranjang'] as $item) {
         $subtotalEmas += $item['HargaTotal'];
     }
     
-    // RUMUS BARU: Subtotal Emas + Ongkos Bikin - Potongan (Tawar)
     $grandTotal = $subtotalEmas + $totalOngkos - $diskon;
-    
-    // Cegah Grand Total menjadi minus (jika kasir salah ketik diskon terlalu besar)
-    if ($grandTotal < 0) {
-        $grandTotal = 0;
-    }
+    if ($grandTotal < 0) { $grandTotal = 0; }
 
-    // --- MULAI TRANSAKSI DATABASE ---
     mysqli_begin_transaction($koneksi);
 
     try {
-        // A. SIMPAN / UPDATE DATA PELANGGAN
+        // A. DATA PELANGGAN
         $cekPel = mysqli_query($koneksi, "SELECT PelangganID FROM pelanggan WHERE NoHP = '$hpPel' LIMIT 1");
         if (mysqli_num_rows($cekPel) > 0) {
             $pelangganID = mysqli_fetch_assoc($cekPel)['PelangganID'];
-            // Update email dan nama terbaru
             mysqli_query($koneksi, "UPDATE pelanggan SET Email='$emailPel', NamaPelanggan='$namaPel' WHERE PelangganID='$pelangganID'");
         } else {
             mysqli_query($koneksi, "INSERT INTO pelanggan (NamaPelanggan, NoHP, Email, Alamat) VALUES ('$namaPel', '$hpPel', '$emailPel', '$alamat')");
             $pelangganID = mysqli_insert_id($koneksi);
         }
 
-        // B. SIMPAN HEADER TRANSAKSI (DENGAN ONGKOS DAN DISKON)
+        // B. HEADER TRANSAKSI
         $tgl = date('Y-m-d H:i:s');
         $queryHeader = "INSERT INTO transaksi (PelangganID, KaryawanID, TanggalWaktu, TipeTransaksi, TotalOngkos, TotalDiskon, TotalTransaksi) 
                         VALUES ('$pelangganID', '$kasirID', '$tgl', 'Penjualan', '$totalOngkos', '$diskon', '$grandTotal')";
         
-        if (!mysqli_query($koneksi, $queryHeader)) {
-            // Tambahkan mysqli_error agar jika gagal, pesan error detail dari database muncul
-            throw new Exception("Gagal simpan header transaksi: " . mysqli_error($koneksi));
-        }
+        if (!mysqli_query($koneksi, $queryHeader)) { throw new Exception("Gagal simpan header"); }
         $transaksiID = mysqli_insert_id($koneksi);
 
-        // C. SIMPAN DETAIL BARANG & UPDATE STOK
+        // C. DETAIL BARANG
         foreach ($_SESSION['keranjang'] as $item) {
             $barangID = $item['BarangID'];
             $hargaSatuan = $item['HargaTotal']; 
-            
-            // Insert Detail
-            $queryDetail = "INSERT INTO detail_transaksi_barang (TransaksiID, BarangID, HargaSatuanSaatItu, Ongkos) 
-                            VALUES ('$transaksiID', '$barangID', '$hargaSatuan', 0)";
-            mysqli_query($koneksi, $queryDetail);
-
-            // Update Stok jadi 'Terjual'
-            $queryUpdateStok = "UPDATE barang_stok SET Status = 'Terjual' WHERE BarangID = '$barangID'";
-            mysqli_query($koneksi, $queryUpdateStok);
+            mysqli_query($koneksi, "INSERT INTO detail_transaksi_barang (TransaksiID, BarangID, HargaSatuanSaatItu, Ongkos) VALUES ('$transaksiID', '$barangID', '$hargaSatuan', 0)");
+            mysqli_query($koneksi, "UPDATE barang_stok SET Status = 'Terjual' WHERE BarangID = '$barangID'");
         }
 
-        // D. SIMPAN PEMBAYARAN
-        $queryBayar = "INSERT INTO pembayaran (TransaksiID, MetodeID, JumlahBayar) 
-                       VALUES ('$transaksiID', '$metodeBayar', '$grandTotal')";
-        mysqli_query($koneksi, $queryBayar);
+        // D. PEMBAYARAN
+        mysqli_query($koneksi, "INSERT INTO pembayaran (TransaksiID, MetodeID, JumlahBayar) VALUES ('$transaksiID', '$metodeBayar', '$grandTotal')");
 
-        // --- COMMIT TRANSAKSI (Simpan Permanen) ---
+        // COMMIT TRANSAKSI
         mysqli_commit($koneksi);
 
-
-        // ============================================================
-        // E. PROSES KIRIM EMAIL (DIAKTIFKAN)
-        // ============================================================
-        $pesanStatus = "Transaksi Berhasil! Nota siap dicetak.";
-
+        // E. KIRIM EMAIL (Opsional)
+        $kirim = false;
         if (!empty($emailPel)) {
-            // Panggil Library Mailer
             include '../../library/mailer.php';
-            
-            // Jalankan fungsi kirim
             $kirim = kirimSuratEmas($emailPel, $transaksiID, $namaPel);
-            
-            if ($kirim) {
-                $pesanStatus .= "\\n\\n[INFO] Surat Emas Digital SUKSES terkirim ke email pelanggan.";
-            } else {
-                $pesanStatus .= "\\n\\n[WARNING] Gagal mengirim email. Cek koneksi internet atau pengaturan SMTP.";
-            }
         }
-        // ============================================================
 
+        // =========================================================================
+        // F. BUILD WUJUD NOTA THERMAL HTML UNTUK DIKIRIM KE MODAL
+        // =========================================================================
+        $qKasir = mysqli_query($koneksi, "SELECT NamaKaryawan FROM karyawan WHERE KaryawanID = '$kasirID'");
+        $namaKasir = ($qKasir && mysqli_num_rows($qKasir) > 0) ? mysqli_fetch_assoc($qKasir)['NamaKaryawan'] : 'Super Admin';
+        $tglFormat = date('d/m/Y H:i', strtotime($tgl));
 
-        // Kosongkan Keranjang
+        $notaHtml = '<div style="font-family: \'Courier New\', Courier, monospace; font-size: 12px; color: #000; width: 100%; line-height: 1.2;">';
+        $notaHtml .= '<div style="text-align: center;"><h2 style="margin: 0; font-size: 16px;">TOKO MAS AMANDA</h2><p style="margin: 5px 0 0 0;">Jl. Ps. Pancasila, Lengkongsari<br>Tasikmalaya 46111</p><p style="margin: 0 0 5px 0;">Telp: 0812-3456-7890</p></div>';
+        $notaHtml .= '<div style="border-bottom: 1px dashed #000; margin: 8px 0;"></div>';
+        
+        $notaHtml .= '<table style="width: 100%; border-collapse: collapse; font-size: 12px;">';
+        $notaHtml .= '<tr><td style="padding: 2px 0;">No. Nota</td><td style="padding: 2px 0; text-align: right; font-weight: bold;">#TRX-'.$transaksiID.'</td></tr>';
+        $notaHtml .= '<tr><td style="padding: 2px 0;">Tanggal</td><td style="padding: 2px 0; text-align: right;">'.$tglFormat.'</td></tr>';
+        $notaHtml .= '<tr><td style="padding: 2px 0;">Kasir</td><td style="padding: 2px 0; text-align: right;">'.$namaKasir.'</td></tr>';
+        $notaHtml .= '<tr><td style="padding: 2px 0;">Pelanggan</td><td style="padding: 2px 0; text-align: right;">'.$namaPel.'</td></tr>';
+        $notaHtml .= '</table>';
+        
+        $notaHtml .= '<div style="border-bottom: 1px dashed #000; margin: 8px 0;"></div>';
+        
+        $notaHtml .= '<table style="width: 100%; border-collapse: collapse; font-size: 12px;">';
+        foreach ($_SESSION['keranjang'] as $item) {
+            $notaHtml .= '<tr><td colspan="2" style="padding: 2px 0; font-weight: bold;">'.$item['Nama'].' ('.$item['Kadar'].')</td></tr>';
+            $notaHtml .= '<tr><td style="padding: 2px 0;">SN: '.$item['Kode'].' - '.$item['Berat'].'g</td><td style="padding: 2px 0; text-align: right;">Rp '.number_format($item['HargaTotal'], 0, ',', '.').'</td></tr>';
+        }
+        $notaHtml .= '</table>';
+        
+        $notaHtml .= '<div style="border-bottom: 1px dashed #000; margin: 8px 0;"></div>';
+        
+        $notaHtml .= '<table style="width: 100%; border-collapse: collapse; font-size: 12px;">';
+        $notaHtml .= '<tr><td style="padding: 2px 0;">Subtotal Emas</td><td style="padding: 2px 0; text-align: right;">Rp '.number_format($subtotalEmas, 0, ',', '.').'</td></tr>';
+        if($totalOngkos > 0) { $notaHtml .= '<tr><td style="padding: 2px 0;">Ongkos Bikin</td><td style="padding: 2px 0; text-align: right;">Rp '.number_format($totalOngkos, 0, ',', '.').'</td></tr>'; }
+        if($diskon > 0) { $notaHtml .= '<tr><td style="padding: 2px 0;">Potongan Harga</td><td style="padding: 2px 0; text-align: right;">(Rp '.number_format($diskon, 0, ',', '.').')</td></tr>'; }
+        $notaHtml .= '<tr><td style="padding: 6px 0 2px 0; font-weight: bold; font-size: 14px;">GRAND TOTAL</td><td style="padding: 6px 0 2px 0; text-align: right; font-weight: bold; font-size: 14px;">Rp '.number_format($grandTotal, 0, ',', '.').'</td></tr>';
+        $notaHtml .= '</table>';
+        
+        $notaHtml .= '<div style="border-bottom: 1px dashed #000; margin: 8px 0;"></div>';
+        $notaHtml .= '<div style="text-align: center;"><p style="margin: 5px 0;">Terima Kasih atas Kunjungan Anda</p><p style="font-size: 10px; margin: 5px 0;">Barang yang sudah dibeli dapat dijual kembali dengan potongan harga sesuai ketentuan toko.</p>';
+        if (!empty($emailPel) && $kirim) { $notaHtml .= '<p style="font-size: 10px; margin-top: 5px; color: #0d6efd;">** Surat Emas Digital Dikirim ke Email **</p>'; }
+        $notaHtml .= '</div></div>';
+
+        // Hapus Keranjang setelah nota dirakit
         unset($_SESSION['keranjang']);
 
-        // Redirect ke Cetak Nota
-        echo "<script>
-            alert('$pesanStatus');
-            window.location = 'cetak_nota.php?id=$transaksiID';
-        </script>";
+        if ($isAjax) {
+            echo json_encode(['status' => 'success', 'receipt_html' => $notaHtml]);
+            exit;
+        }
 
     } catch (Exception $e) {
-        // Kalau ada error database, batalkan semua
         mysqli_rollback($koneksi);
-        echo "Gagal Memproses Transaksi: " . $e->getMessage();
-        echo "<br><br><a href='input_jual.php' style='padding: 10px 20px; background: #0d6efd; color: white; text-decoration: none; border-radius: 5px;'>Kembali ke Kasir</a>";
+        if ($isAjax) {
+            echo json_encode(['status' => 'error', 'message' => "Gagal Memproses: " . $e->getMessage()]);
+            exit;
+        }
     }
-
-} else {
-    header("Location: input_jual.php");
 }
 ?>

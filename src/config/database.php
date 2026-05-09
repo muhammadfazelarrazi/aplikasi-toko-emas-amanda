@@ -1,9 +1,9 @@
 <?php
 // Konfigurasi Database
 $host = "localhost";
-$user = "root";
-$pass = "";
-$db   = "toko_emas_amanda";
+$user = "fazn3461_fazel";
+$pass = "Fxzl_130601";
+$db   = "fazn3461_amanda";
 
 $koneksi = mysqli_connect($host, $user, $pass, $db);
 
@@ -14,16 +14,23 @@ if (!$koneksi) {
 // ==================================================================
 // SETTING ZONA WAKTU INDONESIA (WIB / GMT+7)
 // ==================================================================
-
-// 1. Atur Waktu di PHP (Agar fungsi date() benar)
 date_default_timezone_set('Asia/Jakarta');
-
-// 2. Atur Waktu di MySQL (Agar fungsi NOW() atau CURRENT_TIMESTAMP benar)
 mysqli_query($koneksi, "SET time_zone = '+07:00'");
 
 // ==================================================================
+// DEFINISI BASE URL PINTAR (AUTO-DETECT LOKAL VS HOSTING)
+// ==================================================================
+$protocol = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' || 
+             isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') ? "https://" : "http://";
 
-// DEFINISI BASE URL
-// Sesuaikan dengan nama folder di htdocs kamu
-$base_url = "http://localhost/toko_emas_amanda/"; 
+$domain = $_SERVER['HTTP_HOST'];
+
+// LOGIKA OTOMATIS BARU: 
+if ($domain == 'localhost' || $domain == '127.0.0.1') {
+    // Jika di laptop/lokal
+    $base_url = $protocol . $domain . "/toko_emas_amanda/"; 
+} else {
+    // Jika di hosting Rumahweb, masuk ke folder AMANDA
+    $base_url = $protocol . $domain . "/AMANDA/"; 
+}
 ?>

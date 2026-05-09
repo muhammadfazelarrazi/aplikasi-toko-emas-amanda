@@ -77,7 +77,7 @@ $html = '
             <td style="text-align: center;">
                 <span style="color: #0d6efd; font-size: 20pt; font-weight: bold;">TOKO EMAS AMANDA</span><br>
                 <span style="font-size: 9pt; color: #555;">Jl. Ps. Pancasila, Lengkongsari, Kec. Tawang, Kota Tasikmalaya</span><br>
-                <span style="font-size: 9pt; color: #555;">WA: 0812-3456-7890 | Periode Laporan: '.$format_mulai.'</span>
+                <span style="font-size: 9pt; color: #555;">WA: 0812-3456-7890 | Periode Laporan: '.$teks_periode.'</span>
             </td>
         </tr>
     </table>
