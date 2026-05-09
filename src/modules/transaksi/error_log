@@ -1,0 +1,8 @@
+[29-Apr-2026 09:29:05 Asia/Jakarta] PHP Fatal error:  Uncaught RuntimeException: Composer detected issues in your platform: Your Composer dependencies require a PHP version ">= 8.1.0". You are running 7.4.33. in /home/fazn3461/public_html/AMANDA/vendor/composer/platform_check.php:22
+Stack trace:
+#0 /home/fazn3461/public_html/AMANDA/vendor/composer/autoload_real.php(25): require()
+#1 /home/fazn3461/public_html/AMANDA/vendor/autoload.php(22): ComposerAutoloaderInitbfba043592e4b8da96af47c74311c9de::getLoader()
+#2 /home/fazn3461/public_html/AMANDA/modules/transaksi/surat_emas.php(8): require_once('/home/fazn3461/...')
+#3 /home/fazn3461/public_html/AMANDA/modules/transaksi/surat_email.php(44): include('/home/fazn3461/...')
+#4 {main}
+  thrown in /home/fazn3461/public_html/AMANDA/vendor/composer/platform_check.php on line 22
