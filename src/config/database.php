@@ -1,9 +1,9 @@
 <?php
 // Konfigurasi Database
 $host = "localhost";
-$user = "fazn3461_fazel";
-$pass = "Fxzl_130601";
-$db   = "fazn3461_amanda";
+$user = "root";
+$pass = "";
+$db   = "toko_emas_amanda";
 
 $koneksi = mysqli_connect($host, $user, $pass, $db);
 
